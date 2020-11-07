@@ -7,7 +7,7 @@
 #include <time.h>
 #include <stdlib.h>
 
-void printGameField(int field[])
+void printGameField(char field[])
 {
     int i;
     for (i = 0; i < FIELD_SIZE; ++i)
@@ -24,7 +24,7 @@ void printGameField(int field[])
     }
 }
 
-BOOL checkIfWon(BOOL xIs, int field[])
+BOOL checkIfWon(BOOL xIs, char field[])
 {
     int posLines[8][3] = 
     {
@@ -76,7 +76,7 @@ void setupClient(SOCKET *socket_pointer)
     memset(&hints, 0, sizeof(hints));
     hints.ai_socktype = SOCK_STREAM;
     struct addrinfo *peer_address;
-    if (getaddrinfo(ipAddress, "8085", &hints, &peer_address)) {
+    if (getaddrinfo(ipAddress, "8080", &hints, &peer_address)) {
         fprintf(stderr, "getaddrinfo() failed. (%d)\n", GETSOCKETERRNO());
         return;
     }
@@ -101,24 +101,23 @@ void setupClient(SOCKET *socket_pointer)
     *socket_pointer = socket_peer; 
 }
 
-BOOL getWhoStarts(SOCKET socket)
+BOOL getWhoStarts(SOCKET mySocket)
 {
     while (TRUE)
     {
         fd_set reads; 
         FD_ZERO(&reads);
-        FD_SET(socket, &reads);
+        FD_SET(mySocket, &reads);
 
-        if (select(socket + 1, &reads, 0, 0, 0)) {
+        if (select(mySocket + 1, &reads, 0, 0, 0) < 0) {
             fprintf(stderr, "select() failed. (%d) \n", GETSOCKETERRNO());
             exit(0);
         }
-        if (FD_ISSET(socket, &reads))
+        if (FD_ISSET(mySocket, &reads))
         {
             char read[1];
-            int bytes_received = recv(socket, read, 1, 0);
+            int bytes_received = recv(mySocket, read, 1, 0);
 
-            printf("Rec data %d\n", read[0]);
             if  (bytes_received < 1)
             {
                 printf("Connection closed peer.\n");
@@ -126,12 +125,11 @@ BOOL getWhoStarts(SOCKET socket)
             }
             if (read[0] == 0 || read[0] == 1)
             {
-                printf("Rec data %d\n", read[0]);
                 return read[0];
             }
             else
             {
-                fprintf(stderr, "received wrong data. %d", GETSOCKETERRNO());
+                fprintf(stderr, "received wrong data. %d\n", GETSOCKETERRNO());
                 exit(0);
             }
         }
@@ -148,7 +146,7 @@ void setupHost(SOCKET *socketClient, SOCKET *socketHost)
     hints.ai_flags = AI_PASSIVE;
 
     struct addrinfo *bind_address;
-    getaddrinfo(0, "8085", &hints, &bind_address);
+    getaddrinfo(0, "8080", &hints, &bind_address);
 
 
     /* Creating socket... */
@@ -190,46 +188,17 @@ void setupHost(SOCKET *socketClient, SOCKET *socketHost)
     *socketHost = socket_listen;
 }
 
-void sendWhoStarts(SOCKET socket, SOCKET clientSocket,  BOOL hostIs)
+void sendWhoStarts(SOCKET clientSocket,  BOOL hostIs)
 {
     char response[1];
     response[0] = hostIs;
-    int bytes_sent = send(clientSocket, response, strlen(response), 0);
+    int bytes_sent = send(clientSocket, response, 1, 0);
     if (bytes_sent != 1)
-        printf("Error sending data %d", bytes_sent);
+        printf("Error sending data %d\n", bytes_sent);
 }
 
-void doGame(BOOL wantToHost)
+void play(char field[], BOOL xIs)
 {
-    SOCKET socket;
-    SOCKET clientSocket;
-    if (!wantToHost)
-        setupClient(&socket);
-    else 
-        setupHost(&socket, &clientSocket);
-
-    int field[FIELD_SIZE];
-    int i;
-    for (i = 0; i < FIELD_SIZE; ++i)
-        field[i] = 0;  
-
-    srand(time(NULL));   
-    int r = rand() % 2;
-    BOOL xIs = r;
-
-    BOOL hostStarts;
-    if (!wantToHost)
-    {
-        hostStarts = getWhoStarts(socket);
-    }
-    else 
-    {
-        hostStarts = xIs;
-        sendWhoStarts(socket, clientSocket, xIs);
-    }
-
-    printf("%d \n", hostStarts);
-
     while (TRUE)
     {
         printf("Enter number 1 to 9 for playing\n"); 
@@ -270,10 +239,42 @@ void doGame(BOOL wantToHost)
         printGameField(field);
     }        
  
+}
+
+void doGame(BOOL wantToHost)
+{
+    SOCKET mySocket;
+    SOCKET clientSocket;
+    if (!wantToHost)
+        setupClient(&mySocket);
+    else 
+        setupHost(&clientSocket, &mySocket);
+
+    char field[FIELD_SIZE];
+    int i;
+    for (i = 0; i < FIELD_SIZE; ++i)
+        field[i] = 0;  
+
+    srand(time(NULL));   
+    BOOL r = rand() % 2;
+
+    BOOL hostStarts;
+    if (!wantToHost)
+    {
+        hostStarts = getWhoStarts(mySocket);
+    }
+    else 
+    {
+        hostStarts = r;
+        sendWhoStarts(clientSocket, r);
+    }
+
+    printf("%d \n", hostStarts);
+
     if (wantToHost)
         CLOSESOCKET(clientSocket);
 
-    CLOSESOCKET(socket);
+    CLOSESOCKET(mySocket);
 
 }
 
@@ -288,7 +289,6 @@ int main()
         wantToHost = FALSE;
 
     doGame(wantToHost); 
-
 
     return 0;
 }    
