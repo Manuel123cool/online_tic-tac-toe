@@ -76,7 +76,7 @@ void setupClient(SOCKET *socket_pointer)
     memset(&hints, 0, sizeof(hints));
     hints.ai_socktype = SOCK_STREAM;
     struct addrinfo *peer_address;
-    if (getaddrinfo(ipAddress, "8080", &hints, &peer_address)) {
+    if (getaddrinfo(ipAddress, "8086", &hints, &peer_address)) {
         fprintf(stderr, "getaddrinfo() failed. (%d)\n", GETSOCKETERRNO());
         return;
     }
@@ -146,7 +146,7 @@ void setupHost(SOCKET *socketClient, SOCKET *socketHost)
     hints.ai_flags = AI_PASSIVE;
 
     struct addrinfo *bind_address;
-    getaddrinfo(0, "8080", &hints, &bind_address);
+    getaddrinfo(0, "8086", &hints, &bind_address);
 
 
     /* Creating socket... */
@@ -199,46 +199,84 @@ void sendWhoStarts(SOCKET clientSocket,  BOOL hostIs)
 
 void play(char field[], BOOL xIs)
 {
+    printf("Enter number 1 to 9 for playing\n"); 
+    int enterNum = -1;
+    scanf("%d", &enterNum);
+
+    if (field[enterNum - 1] != 0)
+    {
+        printf("Number is occupied\n");
+        return;
+    }
+
+    if (xIs)
+    {
+        field[enterNum - 1] = 1;
+        xIs = FALSE;
+    }
+    else
+    {
+        field[enterNum - 1] = 2;
+        xIs = TRUE;
+    }
+
+    BOOL xIsWon = checkIfWon(TRUE, field);
+    BOOL oIsWon = checkIfWon(FALSE, field);
+
+    if (xIsWon)
+    {
+        printf("X won\n");
+        exit(0);
+    } 
+    if (oIsWon)
+    {
+        printf("O won\n");
+        exit(0);
+    }
+}
+
+void sendGameField(SOCKET mySocket, char field[])
+{
+    int bytes_sent = send(mySocket, field, FIELD_SIZE, 0);
+    if (bytes_sent != FIELD_SIZE)
+        printf("Error sending data %d\n", bytes_sent);
+   
+}
+
+void getGameField(SOCKET mySocket, char field[])
+{
     while (TRUE)
     {
-        printf("Enter number 1 to 9 for playing\n"); 
-        int enterNum = -1;
-        scanf("%d", &enterNum);
+        fd_set reads; 
+        FD_ZERO(&reads);
+        FD_SET(mySocket, &reads);
 
-        if (field[enterNum - 1] != 0)
-        {
-            printf("Number is occupied\n");
-            continue;
+        if (select(mySocket + 1, &reads, 0, 0, 0) < 0) {
+            fprintf(stderr, "select() failed. (%d) \n", GETSOCKETERRNO());
+            exit(0);
         }
-
-        if (xIs)
+        if (FD_ISSET(mySocket, &reads))
         {
-            field[enterNum - 1] = 1;
-            xIs = FALSE;
+            char receiveData[FIELD_SIZE];
+            memset(receiveData, 0, FIELD_SIZE);
+            int bytes_received = recv(mySocket, receiveData, FIELD_SIZE, 0);
+
+            if  (bytes_received < 1)
+            {
+                printf("Connection closed \n");
+                break;
+            }
+            else if (bytes_received != FIELD_SIZE)
+            {
+                printf("Not all data send.\n");
+                break;
+            }
+            int i;
+            for (i = 0; i < FIELD_SIZE; ++i)
+                field[i] = receiveData[i];
+            break;
         }
-        else
-        {
-            field[enterNum - 1] = 2;
-            xIs = TRUE;
-        }
-
-        BOOL xIsWon = checkIfWon(TRUE, field);
-        BOOL oIsWon = checkIfWon(FALSE, field);
-
-        if (xIsWon)
-        {
-            printf("X won\n");
-            return;
-        } 
-        if (oIsWon)
-        {
-            printf("O won\n");
-            return;
-        }
-
-        printGameField(field);
-    }        
- 
+    }
 }
 
 void doGame(BOOL wantToHost)
@@ -269,7 +307,32 @@ void doGame(BOOL wantToHost)
         sendWhoStarts(clientSocket, r);
     }
 
-    printf("%d \n", hostStarts);
+    SOCKET reSendSocket = wantToHost ? clientSocket : mySocket;
+
+    if ((!wantToHost && !hostStarts) || (wantToHost && hostStarts))
+    {
+        while(TRUE)
+        {
+            play(field, TRUE);
+            printGameField(field);
+            sendGameField(reSendSocket, field);
+            getGameField(reSendSocket, field);
+            printGameField(field);
+        }
+    }
+
+    if ((wantToHost && !hostStarts) || (!wantToHost && hostStarts))
+    {
+        while(TRUE)
+        {
+            getGameField(reSendSocket, field);
+            printGameField(field);
+            play(field, FALSE);
+            sendGameField(reSendSocket, field);
+            printGameField(field);
+        }
+    }
+
 
     if (wantToHost)
         CLOSESOCKET(clientSocket);
